@@ -36,13 +36,26 @@ class SearchDOIService:
         link_cursor.close()
         return link_and_media_type_object
 
+    def get_link_and_media_type_and_title(self, search_result_id):
+        where = {"_id": search_result_id}
+        what = {"link": 1, "_id": 0, "media_type": 1, "title": 1}
+        self.db_service.set_collection("search_results")
+        link_cursor = self.db_service.select_what_where(what, where)
+        link = link_cursor.next()
+        if 'media_type' in link:
+            link_and_media_type_and_title_object = {"link": Link(url=link['link']['url']), "media_type": link['media_type'], "title": link['title']}
+        else:
+            link_and_media_type_and_title_object = {"link": Link(url=link['link']['url']), "media_type": "", "title": link['title']}
+        link_cursor.close()
+        return link_and_media_type_and_title_object
+
     def get_link(self):
         return self.link
 
     def set_link(self, link):
         self.link = link
 
-    def next_step(self, link_and_media_type):
+    def next_step(self, link_and_media_type_and_title):
         match(self.current_state.to_string()):
             case "unprocessed":
                 self.replace()
@@ -53,7 +66,11 @@ class SearchDOIService:
                 self.search_link()
                 return self.link
             case "link searched":
-                media_type = link_and_media_type['media_type']
+                title = link_and_media_type_and_title['title']
+                self.search_crossref(title)
+                return self.link
+            case "crossref searched":
+                media_type = link_and_media_type_and_title['media_type']
                 self.search_content(media_type)
                 return self.link
             case "content searched":
@@ -80,6 +97,9 @@ class SearchDOIService:
 
     def search_link(self):
         self.current_state.search_link(self.link, self.logging_service)
+
+    def search_crossref(self, title):
+        self.current_state.search_crossref(self.link, title, self.logging_service)
 
     def search_content(self, media_type):
         self.current_state.search_content(self.link, media_type, self.logging_service)

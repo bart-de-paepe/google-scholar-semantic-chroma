@@ -12,6 +12,9 @@ class SearchDOIState(ABC):
     def search_link(self, link, logging_service):
         print("You can't search link")
 
+    def search_crossref(self, link, title, logging_service):
+        print("You can't search crossref")
+
     def search_content(self, link, media_type, logging_service):
         print("You can't search content")
 

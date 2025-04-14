@@ -7,6 +7,7 @@ from app.src.services.crossref_service import CrossrefService
 from app.src.services.email_service import EmailService
 from app.src.services.parse_service import ParseService
 from app.src.services.search_DOI_service import SearchDOIService
+from app.src.services.semantic_search_service import SemanticSearchService
 
 
 @click.group()
@@ -106,8 +107,8 @@ def process_search_doi(
     try:
         unprocessed_search_result_ids = search_doi_service.get_unprocessed_ids()
         for search_result_id in unprocessed_search_result_ids:
-            link_and_media_type = search_doi_service.get_link_and_media_type(search_result_id['_id'])
-            link = link_and_media_type['link']
+            link_and_media_type_and_title = search_doi_service.get_link_and_media_type_and_title(search_result_id['_id'])
+            link = link_and_media_type_and_title['link']
             search_doi_service.set_link(link)
             print(link.url)
             print("initial state: " + search_doi_service.current_state.to_string())
@@ -116,7 +117,7 @@ def process_search_doi(
             try:
                 while not link.doi and not search_doi_service.processing_finished():
                     print("next step: " + search_doi_service.current_state.to_string())
-                    link = search_doi_service.next_step(link_and_media_type)
+                    link = search_doi_service.next_step(link_and_media_type_and_title)
                 # update the link
                 search_doi_service.update_link_content(search_result_id['_id'])
                 # flag the search result as processed
@@ -171,6 +172,14 @@ def process_crossref(
         }
         parse_service.update_search_result(search_result_update_what, search_result_update_where)
 
+@cli.command()
+@inject
+def process_semantic_search(
+        semantic_search_service: SemanticSearchService = Provide[Container.semantic_search_service],
+):
+    unprocessed_ids = semantic_search_service.get_unprocessed_ids()
+    for id in unprocessed_ids:
+        pass
 
 if __name__ == '__main__':
     container = Container()

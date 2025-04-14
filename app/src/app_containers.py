@@ -10,6 +10,7 @@ from app.src.services import crossref_service
 from app.src.services import email_service
 from app.src.services import parse_service
 from app.src.services import search_DOI_service
+from app.src.services import semantic_search_service
 
 
 class Container(containers.DeclarativeContainer):
@@ -58,6 +59,12 @@ class Container(containers.DeclarativeContainer):
 
     crossref_service = providers.Factory(
         crossref_service.CrossrefService,
+        db_service=db_service,
+        logging_service=logging_service,
+    )
+
+    semantic_search_service = providers.Factory(
+        semantic_search_service.SemanticSearchService,
         db_service=db_service,
         logging_service=logging_service,
     )
