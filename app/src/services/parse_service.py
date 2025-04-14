@@ -139,7 +139,8 @@ class ParseService:
                 },
                 "media_type": search_result.media_type,
                 "log_message": search_result.log_message,
-                "is_processed": search_result.is_processed
+                "is_processed": search_result.is_processed,
+                "score": search_result.score,
             }
         else:
             post = {

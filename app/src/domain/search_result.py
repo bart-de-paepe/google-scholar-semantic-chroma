@@ -13,4 +13,5 @@ class SearchResult(Entity):
         self.media_type = media_type
         self.log_message = ''
         self.is_processed = False
+        self.score = 0
         super().__init__()

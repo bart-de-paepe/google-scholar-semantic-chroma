@@ -176,10 +176,23 @@ def process_crossref(
 @inject
 def process_semantic_search(
         semantic_search_service: SemanticSearchService = Provide[Container.semantic_search_service],
-):
+        parse_service: ParseService = Provide[Container.parse_service],
+):  #python -m app.src.main process-semantic-search
     unprocessed_ids = semantic_search_service.get_unprocessed_ids()
-    for id in unprocessed_ids:
-        pass
+    for search_result_id in unprocessed_ids:
+        search_result_title = semantic_search_service.get_title(search_result_id['_id'])
+        score = semantic_search_service.do_semantic_search(search_result_title)
+        # add the distance to the search result
+        search_result_update_where = {
+            "_id": search_result_id['_id'],
+        }
+        current_search_result = parse_service.get_current_search_result(search_result_id['_id'])
+        current_search_result.score = score
+        search_result_update_what = {
+            "score": score,
+        }
+        parse_service.update_search_result(search_result_update_what, search_result_update_where)
+
 
 if __name__ == '__main__':
     container = Container()
