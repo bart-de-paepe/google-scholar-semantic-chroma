@@ -1,121 +1,13 @@
-import os
 import re
-from pathlib import Path
-
-from typing import Dict, List, Literal, Optional, Type, Union
 
 from bs4 import BeautifulSoup
 from bson import ObjectId
-from mirascope.base.tools import DEFAULT_TOOL_DOCSTRING
-from mirascope.anthropic  import AnthropicExtractor, AnthropicCallParams
-from pydantic import BaseModel, Field, computed_field, create_model
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.src.domain.email_body import EmailBody
 from app.src.domain.search_result import SearchResult
 from app.src.services.db_service import DBService
 from app.src.services.logging_service import LoggingService
 from app.src.shared.helper import undo_escape_double_quotes
-
-class Settings(BaseSettings):
-    """Settings for the application"""
-
-    mail_server: Optional[str] = None
-    mail_server_port: Optional[int] = None
-    mail_server_encryption_method: Optional[str] = None
-
-    mail_address: Optional[str] = None
-
-    mail_password: Optional[str] = None
-
-    sender: Optional[str] = None
-
-    content_type_html: Optional[str] = None
-    content_type_pdf: Optional[str] = None
-
-    database: Optional[str] = None
-    collection_emails: Optional[str] = None
-    collection_search_results: Optional[str] = None
-    collection_crossref: Optional[str] = None
-
-    logging_filename: Optional[str] = None
-    logging_level: Optional[str] = None
-
-    anthropic_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
-
-    model_config = SettingsConfigDict(env_file=os.path.join(str(Path(__file__).parent.parent.parent.parent), '.env'))
-
-
-settings = Settings()
-
-# =============================================== #
-# ~~~~~~~~~~~ MIRASCOPE CODE SECTION ~~~~~~~~~~~~ #
-# =============================================== #
-
-
-class FieldDefinition(BaseModel):
-    """Define the fields to extract from the webpage."""
-
-    name: str = Field(..., description="The desired name for this field.")
-    type: Literal["str", "int", "float", "bool", "list"]
-
-
-class SchemaGenerator(AnthropicExtractor[list[FieldDefinition]]):
-    """Generate a schema based on a user query."""
-
-    api_key = settings.anthropic_api_key
-
-    extract_schema: Type[list] = list[FieldDefinition]
-
-    prompt_template = """
-    Call your tool with field definitions based on this query:
-    {query}
-    """
-
-    query: str
-
-class GSExtractor(AnthropicExtractor[BaseModel]):
-    """Extract JSON from a webpage using natural language"""
-
-    api_key = settings.anthropic_api_key
-
-    extract_schema: Type[BaseModel] = BaseModel
-
-    prompt_template = """
-    YOU MUST USE THE PROVIDED TOOL FUNCTION.
-    Call the function with parameters extracted from the following content:
-    {webpage_content}
-    """
-
-    html_text: str
-    query: str
-
-    call_params = AnthropicCallParams(max_tokens=4000)
-
-    @computed_field
-    @property
-    def webpage_content(self) -> str:
-        """Returns the text content of the webpage found at `url`."""
-        soup = BeautifulSoup(self.html_text, "html.parser", from_encoding="utf-8")
-        text = soup.get_text()
-        for link in soup.find_all("a"):
-            text += f"\n{link.get('href')}"
-        return text
-
-    def generate_schema(self) -> None:
-        """Sets `extract_schema` to a schema generated based on `query`."""
-        field_definitions = SchemaGenerator(query=self.query).extract()
-        model = create_model(
-            "ExtractedFields",
-            __doc__=DEFAULT_TOOL_DOCSTRING,
-            **{
-                field.name.replace(" ", "_"): (field.type, ...)
-                for field in field_definitions
-            },
-        )
-        self.extract_schema = list[model]
-
 
 class ParseService:
     def __init__(self, db_service: DBService, logging_service: LoggingService):
@@ -156,71 +48,79 @@ class ParseService:
                 approach utilizing lab-based X-ray microscopy (XRM) to characterize 3D seed&nbsp;…
         </div>
     """
+
     def parse_body(self, email_id, email_body):
         parse_log_message = ""
         body_text = email_body.text_html
         # undo escaping the double quotes
         body_text = undo_escape_double_quotes(body_text)
-        body_text = re.sub(r'<head.*?>.*?</head>', '', body_text, flags=re.DOTALL)
-        # Remove all occurrences of content between <script> and </script>
-        body_text = re.sub(r'<script.*?>.*?</script>', '', body_text, flags=re.DOTALL)
-        # Remove all occurrences of content between <style> and </style>
-        body_text = re.sub(r'<style.*?>.*?</style>', '', body_text, flags=re.DOTALL)
-        query = "title, original_url, authors, year_of_publication, journal_name, snippet"
-        extractor = GSExtractor(html_text=body_text, query=query)
-        try:
-            extractor.generate_schema()
-            extracted_items = extractor.extract(retries=3)
-            email_body.is_google_scholar_format = True
-            for item in extracted_items:
-                result = item.model_dump()
-                search_result = SearchResult(result['title'], result["authors"], result["journal_name"],
-                                             result["year_of_publication"], result["snippet"],
-                                             result["original_url"])
+        soup = BeautifulSoup(body_text, "html.parser", from_encoding="utf-8")
+        all_titles = soup.find_all("a", {"class": "gse_alrt_title"})
+        all_snippets = soup.find_all("div", {"class": "gse_alrt_sni"})
+        if ((len(all_titles) != 0) and (len(all_snippets) != 0) and (len(all_titles) != len(all_snippets))):
+            self.raise_google_scholar_format(email_id, body_text,
+                                             "Problem with Google Scholar classes: gse_alrt_title, gse_alrt_sni: ")
+
+        email_body.is_google_scholar_format = True
+        for i in range(0, len(all_titles)):
+            title = all_titles[i].get_text()
+            snippet = all_snippets[i].get_text()
+            try:
+                data = self.parse_search_result(email_id, all_titles[i], all_snippets[i])
+                search_result = SearchResult(title, data["author"], data["publisher"], data["date"], snippet,
+                                             data["link"], data["media_type"])
                 db_search_result_id = self.store_body_content(email_id, search_result)
                 self.logging_service.logger.debug(
                     f'search result id: {db_search_result_id} parsed and stored in database')
-                print(result['title'])
-                print(result["authors"] or '')
-                print(result["journal_name"] or '')
-                print(result["year_of_publication"] or '')
-                print(result["snippet"] or '')
-                print(result["original_url"] or '')
-                print('---')
-                """
-                for key, value in item.model_dump().items():
-                    print(f"{key}: {value}")
-                
-                result = item.model_dump().items()
-                search_result = SearchResult(result['title'], result["authors"], result["journal_name"],
-                                             result["year_of_publication"], result["snippet"],
-                                             result["original_url"])
-                db_search_result_id = self.store_body_content(email_id, search_result)
-                self.logging_service.logger.debug(
-                    f'search result id: {db_search_result_id} parsed and stored in database')
-                print(result['title'])
-                print(result["authors"] or '')
-                print(result["journal_name"] or '')
-                print(result["year_of_publication"] or '')
-                print(result["snippet"] or '')
-                print(result["original_url"] or '')
-                print('---')
-                """
-                """
-                try:
-                    data = self.parse_search_result(email_id, all_titles[i], all_snippets[i])
-                    search_result = SearchResult(title, data["author"], data["publisher"], data["date"], snippet, data["link"], data["media_type"])
-                    db_search_result_id = self.store_body_content(email_id, search_result)
-                    self.logging_service.logger.debug(f'search result id: {db_search_result_id} parsed and stored in database')
-                except IndexError as error:
-                    index, log_message, is_parsed, is_google_scholar_format = error.args
-                    parse_log_message += log_message + "\n"
-                    self.logging_service.logger.debug('Index error: {}'.format(error))
-                """
-            email_body.is_parsed = True
-            email_body.log_message = "Body successfully parsed. " + parse_log_message
-        except Exception as e:
-            print(e)
+                #self.add_to_queue(db_search_result_id)
+            except IndexError as error:
+                index, log_message, is_parsed, is_google_scholar_format = error.args
+                parse_log_message += log_message + "\n"
+                self.logging_service.logger.debug('Index error: {}'.format(error))
+        email_body.is_parsed = True
+        email_body.log_message = "Body successfully parsed. " + parse_log_message
+
+    def parse_search_result(self, email_id, title, snippet):
+        link = title.get("href")
+        media_type = title.find_previous()
+        if media_type.name.lower() == "span":
+            media_type = media_type.text.strip("[").strip("]").lower()
+        else:
+            media_type = None
+        author_publisher_year = snippet.find_previous()
+        author_publisher_year = author_publisher_year.get_text()
+        author_publisher_year_parts = []
+
+        if re.search('\xa0-', author_publisher_year):
+            author_publisher_year_parts = author_publisher_year.split("\xa0-")
+        else:
+            author_publisher_year_parts = author_publisher_year.split("-")
+        author = ""
+        publisher = ""
+        date = ""
+        if len(author_publisher_year_parts) > 1:
+            author = author_publisher_year_parts[0]
+            publisher_year_parts = author_publisher_year_parts[1].split(",")
+            if (len(publisher_year_parts) > 1):
+                for pub in range(0, len(publisher_year_parts) - 1):
+                    publisher = publisher + publisher_year_parts[pub] + ", "
+                publisher = publisher.rstrip(", ")
+                date = publisher_year_parts[len(publisher_year_parts) - 1]
+            else:
+                self.raise_google_scholar_format(email_id, publisher_year_parts[0],
+                                                 "Problem with Google Scholar publisher and date: ")
+        else:
+            self.raise_google_scholar_format(email_id, author_publisher_year,
+                                             "Problem with Google Scholar authors, publisher and date: ")
+
+        return {
+            "link": link,
+            "author": author,
+            "publisher": publisher,
+            "date": date,
+            "media_type": media_type,
+        }
+
 
     def store_body_content(self, email_id, search_result: SearchResult):
         search_result.log_message = "Search result parsed successfully."

@@ -1,7 +1,5 @@
 from time import sleep
 
-from requests_toolbelt.utils import dump
-
 from app.src.services.search_DOI_content_searched_state import SearchDOIContentSearchedState
 from app.src.services.search_DOI_state import SearchDOIState
 from app.src.shared.helper import do_external_request, search_in_text, search_in_pdf
