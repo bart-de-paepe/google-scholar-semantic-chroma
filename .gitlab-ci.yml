@@ -1,0 +1,27 @@
+stages:
+    - deploy_docker
+
+.step_deploy_docker:
+  stage: deploy_docker
+  tags:
+    - linux
+  script:
+    - echo unix://$(pwd)/docker.sock
+    - docker -H unix://$(pwd)/docker.sock compose pull
+    - docker -H unix://$(pwd)/docker.sock compose up -d --build
+    - kill %1
+
+deploy_dev_docker_job:
+  extends: .step_deploy_docker
+  before_script:
+    - cp ${DOT_ENV} .env
+    - echo -e "\nHOST=${DOCKER_HOST_CI}" >> .env
+    - rm -f $(pwd)/docker.sock
+    - ssh -nNT -L $(pwd)/docker.sock:/var/run/docker.sock ${DOCKER_HOST_CI} &
+    # ml: copy /app to remote server to be used in python service
+    - rsync -rlgoDOv ./app ${DOCKER_HOST_CI}:${DOCKER_APP_PATH}
+    - mkdir online_pdf
+    - mkdir log
+  variables:
+    DOCKER_HOST_CI: docker-dev.vliz.be
+    DOCKER_APP_PATH: /data/projects/imis-google-scholar-alert

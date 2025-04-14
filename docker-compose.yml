@@ -1,0 +1,74 @@
+version: '3.8'
+name: imis-google-scholar-alert  # This sets the project name
+services:
+  python-app:
+    # Build the image from the Dockerfile in the current directory
+    build: .
+
+    # Host the FastAPI application on port 8000
+    #ports:
+      #- "8000:8000"
+
+    #develop:
+      # Create a `watch` configuration to update the app
+      # https://docs.docker.com/compose/file-watch/#compose-watch-versus-bind-mounts
+      #watch:
+        # Sync the working directory with the `/app` directory in the container
+        #- action: sync
+          #path: .
+          #target: /app
+          # Exclude the project virtual environment — it could be for a
+          # different platform in the container
+          #ignore:
+            #- .venv/
+
+        # Rebuild the image if dependencies change by checking uv.lock
+        #- action: rebuild
+          #path: ./uv.lock
+    #image: ghcr.io/astral-sh/uv:python3.13-bookworm
+    #working_dir: /app
+    #volumes:
+      #- ${DOCKER_APP_PATH}/app:/app
+    command: >
+      bash -c "python -m app.src.main process-email-body &
+              python -m app.src.main process-search-doi &
+              python -m app.src.main process-crossref &
+              tail -f /dev/null"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    mem_limit: 512m
+
+  mongodb:
+    image: mongo:6
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "'db.runCommand(\"ping\").ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672" # RabbitMQ management UI
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mongo-data:
