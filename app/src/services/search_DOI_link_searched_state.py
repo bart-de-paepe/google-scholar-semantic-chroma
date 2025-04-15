@@ -1,4 +1,5 @@
 import json
+import re
 from time import sleep
 
 import crossref_commons.sampling
@@ -22,29 +23,34 @@ class SearchDOILinkedSearchedState(SearchDOIState):
             queries = {'query.title': title}
             response = crossref_commons.sampling.get_sample(size=2, filter=filter, queries=queries)
             logging_service.logger.debug(json.dumps(response))
-            crossref_title = response[0]['title'][0]
-            #print('crossref_title: ', crossref_title)
-            if crossref_title == title:
-                link.doi = response[0]['DOI']
-                logging_service.logger.debug('DOI: ' + link.doi)
-            else:
-                link.doi = None
-                logging_service.logger.debug('DOI is None')
-            if link.doi:
-                logging_service.logger.debug("DOI found in link")
+            crossref_match = False
+            for record in response:
+                if not crossref_match:
+                    crossref_title = record['title'][0]
+                    crossref_title = self.process_title(crossref_title)
+                    title = self.process_title(title)
+
+                    if crossref_title == title:
+                        link.doi = record['DOI']
+                        link.is_doi_success = True
+                        crossref_match = True
+                        logging_service.logger.debug('DOI: ' + link.doi)
+                        logging_service.logger.debug("DOI found in link")
+                    else:
+                        logging_service.logger.debug('DOI is None')
 
         except ValueError as e:
-            #crossref_object = Crossref(response_code=404, log_message='ValueError: ' + str(e), doi_url="https://doi.org/" + link.doi)
             logging_service.logger.error('ValueError: ' + str(e))
-            #self.store_crossref(link_id, crossref_object)
         except ConnectionError as e:
-            #all_numbers = re.findall(r'\d+', str(e))
-            #crossref_object = Crossref(response_code=all_numbers[0], log_message='ConnectionError: ' + str(e), doi_url="https://doi.org/" + link.doi)
             logging_service.logger.error('ConnectionError: ' + str(e))
-            #self.store_crossref(link_id, crossref_object)
             """
             self.logging_service.logger.debug(
                 f'crossref for search result: {link_id} parsed and stored in database')
             """
         finally:
             self.search_doi_service.to_state(SearchDOICrossrefSearchedState(self.search_doi_service))
+
+    def process_title(self, title):
+        title = title.lower()
+        title = re.sub(r'[^a-zA-Z0-9\s]', '', title)
+        return title

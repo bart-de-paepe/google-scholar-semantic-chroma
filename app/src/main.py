@@ -186,10 +186,23 @@ def process_semantic_search(
         search_result_update_where = {
             "_id": search_result_id['_id'],
         }
+        current_link = semantic_search_service.get_current_link(search_result_id['_id'])
+        current_link.is_processed = True
         current_search_result = parse_service.get_current_search_result(search_result_id['_id'])
         current_search_result.score = score
         search_result_update_what = {
-            "score": score,
+            "link": {
+                "url": current_link.url,
+                "location_replace_url": current_link.location_replace_url,
+                "response_code": current_link.response_code,
+                "response_type": current_link.response_type,
+                "is_accepted_type": current_link.is_accepted_type,
+                "DOI": current_link.doi,
+                "log_message": current_link.log_message,
+                "is_DOI_success": current_link.is_doi_success,
+                "is_processed": current_link.is_processed
+            },
+            "score": current_search_result.score,
         }
         parse_service.update_search_result(search_result_update_what, search_result_update_where)
 

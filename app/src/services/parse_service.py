@@ -156,7 +156,8 @@ class ParseService:
                     "url": search_result.link.url,
                 },
                 "log_message": search_result.log_message,
-                "is_processed": search_result.is_processed
+                "is_processed": search_result.is_processed,
+                "score": search_result.score,
             }
         self.db_service.set_collection("search_results")
         post_id = self.db_service.insert_one(post)
