@@ -16,7 +16,14 @@ class SemanticSearchService:
         self.db_service = db_service
         self.logging_service = logging_service
         chroma_client = chromadb.Client()
-        self.collection = chroma_client.create_collection(name="my_collection")
+        # https://docs.trychroma.com/docs/collections/configure
+        self.collection = chroma_client.create_collection(
+            name="my_collection",
+            metadata={
+                "hnsw:space": "cosine"
+            }
+        )
+
         self.initialize_embeddings()
 
 
